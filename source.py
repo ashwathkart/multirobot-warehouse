@@ -358,10 +358,12 @@ def give_way_maneuver(current_position, robot_index):
 
 def golden_path(all_paths):
     current_steps = [0 for _ in all_paths]
+    waiting_robots = set()  # Track robots that are waiting to move
     
     while any(step < len(path) - 1 for step, path in zip(current_steps, all_paths)):
-        # First, check which robots can move without conflicts
         moves_to_make = []
+        
+        # First pass: Check which robots can safely move
         for robot_index, path in enumerate(all_paths):
             if current_steps[robot_index] >= len(path) - 1:
                 continue
@@ -369,38 +371,68 @@ def golden_path(all_paths):
             current_position = path[current_steps[robot_index]]
             next_position = path[current_steps[robot_index] + 1]
             
-            # Check if move is valid and destination is not occupied by another robot
-            if (is_move_valid(next_position) and 
-                next_position not in [sim.robots[i] for i in range(len(sim.robots))]):
+            # Check if next position is safe (not occupied and won't cause collision)
+            is_safe = True
+            
+            # Check if next position conflicts with other robots' current or next positions
+            for other_index, other_path in enumerate(all_paths):
+                if other_index != robot_index and current_steps[other_index] < len(other_path) - 1:
+                    other_current = other_path[current_steps[other_index]]
+                    other_next = other_path[current_steps[other_index] + 1]
+                    
+                    # Check for direct collision or path crossing
+                    if (next_position == other_current or 
+                        next_position == other_next or 
+                        (next_position == other_current and current_position == other_next)):
+                        is_safe = False
+                        break
+            
+            if is_safe and is_move_valid(next_position):
                 moves_to_make.append((robot_index, current_position, next_position))
+            else:
+                waiting_robots.add(robot_index)
         
         # If no moves are possible, try to resolve deadlocks
         if not moves_to_make:
-            for robot_index, path in enumerate(all_paths):
-                if current_steps[robot_index] >= len(path) - 1:
+            deadlock_resolved = False
+            for robot_index in waiting_robots:
+                if current_steps[robot_index] >= len(all_paths[robot_index]) - 1:
                     continue
-                if not sim.giveway[robot_index]:
-                    give_way_maneuver(sim.robots[robot_index], robot_index)
+                    
+                # Try to find an alternative temporary position
+                current_pos = sim.robots[robot_index]
+                if give_way_maneuver(current_pos, robot_index):
+                    deadlock_resolved = True
+                    waiting_robots.remove(robot_index)
+                    break
+            
+            # If we couldn't resolve deadlock, wait a bit and try again
+            if not deadlock_resolved:
+                time.sleep(1/FPS)
+                continue
         
-        # Execute valid moves
+        # Execute safe moves
         for robot_index, current_position, next_position in moves_to_make:
             dx = next_position[0] - current_position[0]
             dy = next_position[1] - current_position[1]
             
+            moved = False
             if dx == 1:
-                sim.moveRobotRight(robot_index)
+                moved = sim.moveRobotRight(robot_index)
             elif dx == -1:
-                sim.moveRobotLeft(robot_index)
+                moved = sim.moveRobotLeft(robot_index)
             elif dy == 1:
-                sim.moveRobotUp(robot_index)
+                moved = sim.moveRobotUp(robot_index)
             elif dy == -1:
-                sim.moveRobotDown(robot_index)
+                moved = sim.moveRobotDown(robot_index)
             
-            current_steps[robot_index] += 1
-            sim.giveway[robot_index] = False  # Reset giveway flag after successful move
+            if moved:
+                current_steps[robot_index] += 1
+                waiting_robots.discard(robot_index)
+                sim.giveway[robot_index] = False
         
         show_pygame_window()
-        time.sleep(1/FPS)  # Add delay to match FPS
+        time.sleep(1/FPS)
 
 def show_pygame_window():
     """Initialize and show the Pygame window"""
