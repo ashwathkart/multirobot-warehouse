@@ -404,12 +404,14 @@ def golden_path(all_paths):
 
 def show_pygame_window():
     """Initialize and show the Pygame window"""
-    pygame.init()
+    # Initialize pygame if not already initialized
+    if not pygame.get_init():
+        pygame.init()
+    
     window_width = sim.width * CELL_SIZE
     window_height = sim.height * CELL_SIZE
     screen = pygame.display.set_mode((window_width, window_height))
     pygame.display.set_caption("Robot Grid Simulation")
-    clock = pygame.time.Clock()
     
     # Define colors
     WHITE = (255, 255, 255)
@@ -424,51 +426,56 @@ def show_pygame_window():
         (0, 255, 255),  # Cyan
     ]
     
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-                pygame.quit()
-                return
-        
-        # Clear screen
-        screen.fill(WHITE)
-        
-        # Draw grid
-        for x in range(sim.width):
-            for y in range(sim.height):
-                rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                pygame.draw.rect(screen, BLACK, rect, 1)
-                
-                # Draw obstacles
-                if sim.obstacles[x][y]:
-                    pygame.draw.rect(screen, GRAY, rect)
-        
-        # Draw robots and their goals
-        for i, (robot, goal) in enumerate(zip(sim.robots, sim.robotGoals)):
-            # Draw robot
-            robot_x = robot[0] * CELL_SIZE + CELL_SIZE // 2
-            robot_y = robot[1] * CELL_SIZE + CELL_SIZE // 2
-            pygame.draw.circle(screen, COLORS[i % len(COLORS)], (robot_x, robot_y), ROBOT_RADIUS)
-            
-            # Draw robot label
-            font = pygame.font.Font(None, 24)
-            label = font.render(sim.robotNames[i], True, BLACK)
-            label_rect = label.get_rect(center=(robot_x, robot_y))
-            screen.blit(label, label_rect)
-            
-            # Draw goal
-            if goal is not None:
-                goal_x = goal[0] * CELL_SIZE + CELL_SIZE // 2
-                goal_y = goal[1] * CELL_SIZE + CELL_SIZE // 2
-                pygame.draw.circle(screen, COLORS[i % len(COLORS)], (goal_x, goal_y), 
-                                 ROBOT_RADIUS//2, 2)  # Draw as outline
-        
-        pygame.display.flip()
-        clock.tick(FPS)
+    # Handle any pending events
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            return
     
-    pygame.quit()
+    # Clear screen
+    screen.fill(WHITE)
+    
+    # Draw grid
+    for x in range(sim.width):
+        for y in range(sim.height):
+            rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            pygame.draw.rect(screen, BLACK, rect, 1)
+            
+            # Draw obstacles
+            if sim.obstacles[x][y]:
+                pygame.draw.rect(screen, GRAY, rect)
+    
+    # Draw robots and their goals
+    all_robots_at_goals = True
+    for i, (robot, goal) in enumerate(zip(sim.robots, sim.robotGoals)):
+        # Draw robot
+        robot_x = robot[0] * CELL_SIZE + CELL_SIZE // 2
+        robot_y = robot[1] * CELL_SIZE + CELL_SIZE // 2
+        pygame.draw.circle(screen, COLORS[i % len(COLORS)], (robot_x, robot_y), ROBOT_RADIUS)
+        
+        # Draw robot label
+        font = pygame.font.Font(None, 24)
+        label = font.render(sim.robotNames[i], True, BLACK)
+        label_rect = label.get_rect(center=(robot_x, robot_y))
+        screen.blit(label, label_rect)
+        
+        # Draw goal
+        if goal is not None:
+            goal_x = goal[0] * CELL_SIZE + CELL_SIZE // 2
+            goal_y = goal[1] * CELL_SIZE + CELL_SIZE // 2
+            pygame.draw.circle(screen, COLORS[i % len(COLORS)], (goal_x, goal_y), 
+                             ROBOT_RADIUS//2, 2)  # Draw as outline
+            
+            # Check if robot is at its goal
+            if robot != goal:
+                all_robots_at_goals = False
+    
+    pygame.display.flip()
+    
+    # If all robots have reached their goals, wait briefly and close
+    if all_robots_at_goals:
+        time.sleep(2)  # Show final state for 2 seconds
+        pygame.quit()
 
 #load the data file and get the map
 sim = RobotGridSimulation(6,11,6)
