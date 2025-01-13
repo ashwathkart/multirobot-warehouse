@@ -3,6 +3,12 @@ import matplotlib.pyplot as plt
 import os
 import math
 import numpy as np
+import pygame
+import time
+
+CELL_SIZE = 50  # Size of each grid cell in pixels
+ROBOT_RADIUS = 20
+FPS = 2  # Frames per second for animation
 
 class RobotGridSimulation:
     def __init__(self,Nrobots:int,width:int,height:int):
@@ -393,21 +399,83 @@ def golden_path(all_paths):
             current_steps[robot_index] += 1
             sim.giveway[robot_index] = False  # Reset giveway flag after successful move
         
-        show_figure()
+        show_pygame_window()
+        time.sleep(1/FPS)  # Add delay to match FPS
 
-def show_figure():
-    fig = plt.figure()
-    ax = plt.subplot(111)
-    plt.axis('equal')
-    sim.plot(ax)
-    plt.show()
+def show_pygame_window():
+    """Initialize and show the Pygame window"""
+    pygame.init()
+    window_width = sim.width * CELL_SIZE
+    window_height = sim.height * CELL_SIZE
+    screen = pygame.display.set_mode((window_width, window_height))
+    pygame.display.set_caption("Robot Grid Simulation")
+    clock = pygame.time.Clock()
+    
+    # Define colors
+    WHITE = (255, 255, 255)
+    BLACK = (0, 0, 0)
+    GRAY = (128, 128, 128)
+    COLORS = [
+        (255, 0, 0),    # Red
+        (0, 255, 0),    # Green
+        (0, 0, 255),    # Blue
+        (255, 255, 0),  # Yellow
+        (255, 0, 255),  # Magenta
+        (0, 255, 255),  # Cyan
+    ]
+    
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+                pygame.quit()
+                return
+        
+        # Clear screen
+        screen.fill(WHITE)
+        
+        # Draw grid
+        for x in range(sim.width):
+            for y in range(sim.height):
+                rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                pygame.draw.rect(screen, BLACK, rect, 1)
+                
+                # Draw obstacles
+                if sim.obstacles[x][y]:
+                    pygame.draw.rect(screen, GRAY, rect)
+        
+        # Draw robots and their goals
+        for i, (robot, goal) in enumerate(zip(sim.robots, sim.robotGoals)):
+            # Draw robot
+            robot_x = robot[0] * CELL_SIZE + CELL_SIZE // 2
+            robot_y = robot[1] * CELL_SIZE + CELL_SIZE // 2
+            pygame.draw.circle(screen, COLORS[i % len(COLORS)], (robot_x, robot_y), ROBOT_RADIUS)
+            
+            # Draw robot label
+            font = pygame.font.Font(None, 24)
+            label = font.render(sim.robotNames[i], True, BLACK)
+            label_rect = label.get_rect(center=(robot_x, robot_y))
+            screen.blit(label, label_rect)
+            
+            # Draw goal
+            if goal is not None:
+                goal_x = goal[0] * CELL_SIZE + CELL_SIZE // 2
+                goal_y = goal[1] * CELL_SIZE + CELL_SIZE // 2
+                pygame.draw.circle(screen, COLORS[i % len(COLORS)], (goal_x, goal_y), 
+                                 ROBOT_RADIUS//2, 2)  # Draw as outline
+        
+        pygame.display.flip()
+        clock.tick(FPS)
+    
+    pygame.quit()
 
 #load the data file and get the map
 sim = RobotGridSimulation(6,11,6)
 # sim.loadMap("D:\Avaritia\MENG Autonomy\Assignment\KKH\KKH HW\Final\Prompt2\map_test.txt")
 sim.loadMap("map1.txt")
 
-show_figure()
+show_pygame_window()
 
 # Define constants
 VELOCITY = 5
