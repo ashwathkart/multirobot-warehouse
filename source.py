@@ -362,3 +362,125 @@ BOUNDS = (0, 0, sim.width, sim.height)
 
 start_positions = (sim.robots)  # Starting coordinates
 goal_positions = (sim.robotGoals)  # Goal coordinates
+
+def manhattan_distance(p1, p2):
+    return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
+
+def get_neighbors(pos, sim):
+    neighbors = []
+    directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]  # up, down, right, left
+    for dx, dy in directions:
+        new_pos = (pos[0] + dx, pos[1] + dy)
+        if (0 <= new_pos[0] < sim.width and 
+            0 <= new_pos[1] < sim.height and 
+            not sim.obstacles[new_pos[0]][new_pos[1]]):
+            neighbors.append(new_pos)
+    return neighbors
+
+def a_star_path(start, goal, sim, occupied_positions):
+    if start == goal:
+        return []
+    
+    frontier = [(0, start)]
+    came_from = {start: None}
+    cost_so_far = {start: 0}
+    
+    while frontier:
+        _, current = heapq.heappop(frontier)
+        
+        if current == goal:
+            break
+            
+        for next_pos in get_neighbors(current, sim):
+            if next_pos in occupied_positions:
+                continue
+                
+            new_cost = cost_so_far[current] + 1
+            if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
+                cost_so_far[next_pos] = new_cost
+                priority = new_cost + manhattan_distance(next_pos, goal)
+                heapq.heappush(frontier, (priority, next_pos))
+                came_from[next_pos] = current
+    
+    if goal not in came_from:
+        return None
+    
+    # Reconstruct path
+    path = []
+    current = goal
+    while current != start:
+        path.append(current)
+        current = came_from[current]
+    path.append(start)
+    path.reverse()
+    return path
+
+def get_move_direction(current_pos, next_pos):
+    dx = next_pos[0] - current_pos[0]
+    dy = next_pos[1] - current_pos[1]
+    if dx == 1: return 'r'
+    if dx == -1: return 'l'
+    if dy == 1: return 'u'
+    if dy == -1: return 'd'
+    return None
+
+def solve_robot_paths():
+    unplaced_robots = list(range(len(sim.robots)))
+    moves_sequence = []
+    
+    while unplaced_robots:
+        # Try to move each unplaced robot
+        for robot_id in unplaced_robots[:]:
+            current_pos = sim.robots[robot_id]
+            goal_pos = sim.robotGoals[robot_id]
+            
+            if current_pos == goal_pos:
+                unplaced_robots.remove(robot_id)
+                continue
+            
+            # Get occupied positions except current robot
+            occupied = set(sim.robots[i] for i in range(len(sim.robots)) if i != robot_id)
+            
+            # Find path to goal
+            path = a_star_path(current_pos, goal_pos, sim, occupied)
+            
+            if path and len(path) > 1:
+                # Move one step along the path
+                next_pos = path[1]
+                
+                # Check if next position is occupied by another robot
+                blocking_robot = None
+                for other_robot in range(len(sim.robots)):
+                    if sim.robots[other_robot] == next_pos:
+                        blocking_robot = other_robot
+                        break
+                
+                if blocking_robot is not None:
+                    # Use exchange algorithm if robots are adjacent
+                    if manhattan_distance(current_pos, next_pos) == 1:
+                        exchange_moves = exchange2x2(
+                            current_pos, sim.robots[blocking_robot],
+                            next_pos, current_pos
+                        )
+                        robot_moves = exchangeToMoves(exchange_moves, [robot_id, blocking_robot])
+                        moves_sequence.extend(robot_moves)
+                        
+                        # Update positions after exchange
+                        sim.robots[robot_id], sim.robots[blocking_robot] = (
+                            sim.robots[blocking_robot], sim.robots[robot_id]
+                        )
+                else:
+                    # Make the move
+                    direction = get_move_direction(current_pos, next_pos)
+                    moves_sequence.append([(robot_id, direction)])
+                    sim.robots[robot_id] = next_pos
+        
+        # Visualize current state
+        show_pygame_window()
+        pygame.time.wait(int(1000/FPS))
+    
+    return moves_sequence
+
+# Execute the solution
+moves = solve_robot_paths()
+print("Solution found with", len(moves), "steps")
