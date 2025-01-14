@@ -1,10 +1,9 @@
-from matplotlib.patches import Rectangle,Circle
-import matplotlib.pyplot as plt
 import os
 import math
 import numpy as np
 import pygame
 import time
+import heapq
 
 CELL_SIZE = 50  # Size of each grid cell in pixels
 ROBOT_RADIUS = 20
@@ -102,37 +101,7 @@ class RobotGridSimulation:
                 return False
             rpos.add(xy)
         return True
-    def plot(self,ax):
-        import matplotlib.pyplot as plt
-        prop_cycle = plt.rcParams['axes.prop_cycle']
-        colors = prop_cycle.by_key()['color']
-        for i in range(len(self.obstacles)):
-            for j in range(len(self.obstacles[i])):
-                if self.obstacles[i][j]:
-                    ax.add_patch(Rectangle((i,j),1,1,fill=True,color=(0.5,0.5,0.5),zorder=0))
-        for index,(r,g) in enumerate(zip(self.robots,self.robotGoals)):
-            i,j = r
-            ax.add_patch(Circle((i+0.5,j+0.5),0.4,fill=False,lw=2,color=colors[index],zorder=4))
-            if g is not None:
-                ax.add_patch(Circle((g[0]+0.5,g[1]+0.5),0.2,fill=False,lw=1,linestyle='--',color=colors[index],zorder=4))
-        ax.plot([0,self.width,self.width,0,0],[0,0,self.height,self.height,0],lw=1,color='k')
-    def plotPaths(self,path:list,ax):
-        """path: a list of (robot,action) pairs, where action is one of 'l','r','u','d' (left,right,up,down)"""
-        import matplotlib.pyplot as plt
-        prop_cycle = plt.rcParams['axes.prop_cycle']
-        colors = prop_cycle.by_key()['color']
-        mvs = [[] for r in self.robots]
-        for (rob,mv) in path:
-            mvs[rob].append(mv)
-        paths = [[r] for r in self.robots]
-        for i,actions in enumerate(mvs):
-            for mv in actions:
-                self.moveRobot(i,mv,check=False)
-                paths[i].append(self.robots[i])
-            if len(paths[i]) > 1:
-                ax.plot([v[0]+0.5 for v in paths[i]],[v[1]+0.5 for v in paths[i]],lw=1,color=colors[i])
-        #restore state
-        self.robots = [path[0] for path in paths]
+
     def moveStr(self,moves:list) -> str:
         """Returns a string indicating a simultaneous move, in the format
         requested by the problem.
@@ -304,136 +273,6 @@ def exchangeToMoves(soln:list, robots:list, simultaneous=True) -> list:
             moves.append([robots[0] if mv[0]=='a' else robots[1],mv[1]])
     return moves
 
-def is_move_valid(next_position):
-    valid_move = True
-    if not (0 <= next_position[0] < sim.range[0] and 0 <= next_position[1] < sim.range[1]):
-        valid_move = False
-    if next_position in sim.obstacle_list:
-        valid_move = False
-    return valid_move    
-
-def give_way_maneuver(current_position, robot_index):
-    if sim.giveway[robot_index]:  # Already trying to give way
-        return False
-        
-    # Try to find a position that's not in any robot's path
-    side_positions = [
-        (current_position[0], current_position[1]+1),
-        (current_position[0], current_position[1]-1),
-        (current_position[0]+1, current_position[1]),
-        (current_position[0]-1, current_position[1])
-    ]
-    
-    # Sort positions by how many other robots' paths they intersect
-    def count_path_intersections(pos):
-        count = 0
-        for path in all_paths:
-            if pos in path:
-                count += 1
-        return count
-    
-    side_positions.sort(key=count_path_intersections)
-    
-    for temp_position in side_positions:
-        if (is_move_valid(temp_position) and 
-            temp_position not in [r for r in sim.robots]):
-            dx = temp_position[0] - current_position[0]
-            dy = temp_position[1] - current_position[1]
-            
-            moved = False
-            if dx == 1:
-                moved = sim.moveRobotRight(robot_index)
-            elif dx == -1:
-                moved = sim.moveRobotLeft(robot_index)
-            elif dy == 1:
-                moved = sim.moveRobotUp(robot_index)
-            elif dy == -1:
-                moved = sim.moveRobotDown(robot_index)
-                
-            if moved:
-                sim.giveway[robot_index] = True
-                return True
-                
-    return False
-
-def golden_path(all_paths):
-    current_steps = [0 for _ in all_paths]
-    waiting_robots = set()  # Track robots that are waiting to move
-    
-    while any(step < len(path) - 1 for step, path in zip(current_steps, all_paths)):
-        moves_to_make = []
-        
-        # First pass: Check which robots can safely move
-        for robot_index, path in enumerate(all_paths):
-            if current_steps[robot_index] >= len(path) - 1:
-                continue
-                
-            current_position = path[current_steps[robot_index]]
-            next_position = path[current_steps[robot_index] + 1]
-            
-            # Check if next position is safe (not occupied and won't cause collision)
-            is_safe = True
-            
-            # Check if next position conflicts with other robots' current or next positions
-            for other_index, other_path in enumerate(all_paths):
-                if other_index != robot_index and current_steps[other_index] < len(other_path) - 1:
-                    other_current = other_path[current_steps[other_index]]
-                    other_next = other_path[current_steps[other_index] + 1]
-                    
-                    # Check for direct collision or path crossing
-                    if (next_position == other_current or 
-                        next_position == other_next or 
-                        (next_position == other_current and current_position == other_next)):
-                        is_safe = False
-                        break
-            
-            if is_safe and is_move_valid(next_position):
-                moves_to_make.append((robot_index, current_position, next_position))
-            else:
-                waiting_robots.add(robot_index)
-        
-        # If no moves are possible, try to resolve deadlocks
-        if not moves_to_make:
-            deadlock_resolved = False
-            for robot_index in waiting_robots:
-                if current_steps[robot_index] >= len(all_paths[robot_index]) - 1:
-                    continue
-                    
-                # Try to find an alternative temporary position
-                current_pos = sim.robots[robot_index]
-                if give_way_maneuver(current_pos, robot_index):
-                    deadlock_resolved = True
-                    waiting_robots.remove(robot_index)
-                    break
-            
-            # If we couldn't resolve deadlock, wait a bit and try again
-            if not deadlock_resolved:
-                time.sleep(1/FPS)
-                continue
-        
-        # Execute safe moves
-        for robot_index, current_position, next_position in moves_to_make:
-            dx = next_position[0] - current_position[0]
-            dy = next_position[1] - current_position[1]
-            
-            moved = False
-            if dx == 1:
-                moved = sim.moveRobotRight(robot_index)
-            elif dx == -1:
-                moved = sim.moveRobotLeft(robot_index)
-            elif dy == 1:
-                moved = sim.moveRobotUp(robot_index)
-            elif dy == -1:
-                moved = sim.moveRobotDown(robot_index)
-            
-            if moved:
-                current_steps[robot_index] += 1
-                waiting_robots.discard(robot_index)
-                sim.giveway[robot_index] = False
-        
-        show_pygame_window()
-        time.sleep(1/FPS)
-
 def show_pygame_window():
     """Initialize and show the Pygame window"""
     # Initialize pygame if not already initialized
@@ -511,7 +350,6 @@ def show_pygame_window():
 
 #load the data file and get the map
 sim = RobotGridSimulation(6,11,6)
-# sim.loadMap("D:\Avaritia\MENG Autonomy\Assignment\KKH\KKH HW\Final\Prompt2\map_test.txt")
 sim.loadMap("map1.txt")
 
 show_pygame_window()
@@ -524,85 +362,3 @@ BOUNDS = (0, 0, sim.width, sim.height)
 
 start_positions = (sim.robots)  # Starting coordinates
 goal_positions = (sim.robotGoals)  # Goal coordinates
-
-# Node representation
-class Node:
-    def __init__(self, position, g_cost=0, parent=None):
-        self.position = position
-        self.g_cost = g_cost  # Total cost from start node to this node
-        self.parent = parent  # Parent node in path
-
-def is_position_valid(position):
-    """Check if the position is within bounds and not an obstacle."""
-    x, y = position
-    if x < BOUNDS[0] or x > BOUNDS[2] or y < BOUNDS[1] or y > BOUNDS[3]:
-        return False  # Out of bounds
-    if position in OBSTACLES:
-        return False  # Position is an obstacle
-    return True
-
-def get_successors(node):
-    directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
-    movement_cost = 1
-    
-    successors = []
-    for d in directions:
-        next_position = (node.position[0] + d[0], node.position[1] + d[1])
-        if is_position_valid(next_position):
-            next_node = Node(next_position, node.g_cost + movement_cost, node)
-            successors.append(next_node)
-    return successors
-
-def dijkstra_search(start, goal):
-    open_set = set()
-    closed_set = set()
-    start_node = Node(start)
-    goal_node = Node(goal)
-    
-    open_set.add(start_node)
-    
-    while open_set:
-        # Select node with minimum g_cost in open set
-        current_node = min(open_set, key=lambda n: n.g_cost)
-
-        if current_node.position == goal_node.position:
-            return reconstruct_path(current_node)
-        
-        open_set.remove(current_node)
-        closed_set.add(current_node)
-        
-        for successor in get_successors(current_node):
-            if successor in closed_set:
-                continue
-            # Improved handling for open_set updates
-            in_open_set = False
-            for open_node in open_set:
-                if open_node.position == successor.position:
-                    in_open_set = True
-                    if successor.g_cost < open_node.g_cost:
-                        open_set.remove(open_node)
-                        open_set.add(successor)
-                    break
-            if not in_open_set:
-                open_set.add(successor)
-
-    return []  # Return empty path if goal not found
-
-# Reconstruct path from goal to start
-def reconstruct_path(node):
-    path = []
-    while node:
-        path.append(node.position)
-        node = node.parent
-    return path[::-1]  # Return reversed path
-
-def find_paths_for_all_robots(start_positions, goal_positions):
-    all_paths = []
-    for start_position, goal_position in zip(start_positions, goal_positions):
-        path = dijkstra_search(start_position, goal_position)
-        all_paths.append(path)
-    return all_paths
-
-all_paths = find_paths_for_all_robots(start_positions, goal_positions)
-
-golden_path(all_paths)
