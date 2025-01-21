@@ -4,6 +4,7 @@ import numpy as np
 import pygame
 import time
 import heapq
+import imageio
 
 CELL_SIZE = 50  # Size of each grid cell in pixels
 ROBOT_RADIUS = 20
@@ -273,16 +274,11 @@ def exchangeToMoves(soln:list, robots:list, simultaneous=True) -> list:
             moves.append([robots[0] if mv[0]=='a' else robots[1],mv[1]])
     return moves
 
-def show_pygame_window():
-    """Initialize and show the Pygame window"""
-    # Initialize pygame if not already initialized
-    if not pygame.get_init():
-        pygame.init()
-    
+def save_frame_as_surface(sim):
+    """Create a pygame surface for a single frame"""
     window_width = sim.width * CELL_SIZE
     window_height = sim.height * CELL_SIZE
-    screen = pygame.display.set_mode((window_width, window_height))
-    pygame.display.set_caption("Robot Grid Simulation")
+    surface = pygame.Surface((window_width, window_height))
     
     # Define colors
     WHITE = (255, 255, 255)
@@ -297,62 +293,139 @@ def show_pygame_window():
         (0, 255, 255),  # Cyan
     ]
     
-    # Handle any pending events
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            return
+    # Clear surface
+    surface.fill(WHITE)
     
-    # Clear screen
-    screen.fill(WHITE)
-    
-    # Draw grid
+    # Draw grid and obstacles
     for x in range(sim.width):
         for y in range(sim.height):
             rect = pygame.Rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-            pygame.draw.rect(screen, BLACK, rect, 1)
-            
-            # Draw obstacles
+            pygame.draw.rect(surface, BLACK, rect, 1)
             if sim.obstacles[x][y]:
-                pygame.draw.rect(screen, GRAY, rect)
+                pygame.draw.rect(surface, GRAY, rect)
     
-    # Draw robots and their goals
-    all_robots_at_goals = True
+    # Draw robots and goals
     for i, (robot, goal) in enumerate(zip(sim.robots, sim.robotGoals)):
         # Draw robot
         robot_x = robot[0] * CELL_SIZE + CELL_SIZE // 2
         robot_y = robot[1] * CELL_SIZE + CELL_SIZE // 2
-        pygame.draw.circle(screen, COLORS[i % len(COLORS)], (robot_x, robot_y), ROBOT_RADIUS)
+        pygame.draw.circle(surface, COLORS[i % len(COLORS)], (robot_x, robot_y), ROBOT_RADIUS)
         
         # Draw robot label
         font = pygame.font.Font(None, 24)
         label = font.render(sim.robotNames[i], True, BLACK)
         label_rect = label.get_rect(center=(robot_x, robot_y))
-        screen.blit(label, label_rect)
+        surface.blit(label, label_rect)
         
         # Draw goal
         if goal is not None:
             goal_x = goal[0] * CELL_SIZE + CELL_SIZE // 2
             goal_y = goal[1] * CELL_SIZE + CELL_SIZE // 2
-            pygame.draw.circle(screen, COLORS[i % len(COLORS)], (goal_x, goal_y), 
-                             ROBOT_RADIUS//2, 2)  # Draw as outline
-            
-            # Check if robot is at its goal
-            if robot != goal:
-                all_robots_at_goals = False
+            pygame.draw.circle(surface, COLORS[i % len(COLORS)], (goal_x, goal_y), 
+                             ROBOT_RADIUS//2, 2)
     
+    return surface
+
+def solve_robot_paths():
+    if not pygame.get_init():
+        pygame.init()
+    
+    # Set up pygame window
+    window_width = sim.width * CELL_SIZE
+    window_height = sim.height * CELL_SIZE
+    screen = pygame.display.set_mode((window_width, window_height))
+    pygame.display.set_caption("Robot Path Planning")
+    clock = pygame.time.Clock()
+    
+    frames = []  # Store frames for GIF
+    unplaced_robots = list(range(len(sim.robots)))
+    moves_sequence = []
+    
+    # Capture initial state
+    surface = save_frame_as_surface(sim)
+    frames.append(pygame.surfarray.array3d(surface))
+    screen.blit(surface, (0, 0))
     pygame.display.flip()
+    clock.tick(FPS)
     
-    # If all robots have reached their goals, wait briefly and close
-    if all_robots_at_goals:
-        time.sleep(2)  # Show final state for 2 seconds
-        pygame.quit()
+    while unplaced_robots:
+        # Try to move each unplaced robot
+        for robot_id in unplaced_robots[:]:
+            current_pos = sim.robots[robot_id]
+            goal_pos = sim.robotGoals[robot_id]
+            
+            if current_pos == goal_pos:
+                unplaced_robots.remove(robot_id)
+                continue
+            
+            # Get occupied positions except current robot
+            occupied = set(sim.robots[i] for i in range(len(sim.robots)) if i != robot_id)
+            
+            # Find path to goal
+            path = a_star_path(current_pos, goal_pos, sim, occupied)
+            
+            if path and len(path) > 1:
+                # Move one step along the path
+                next_pos = path[1]
+                
+                # Check if next position is occupied by another robot
+                blocking_robot = None
+                for other_robot in range(len(sim.robots)):
+                    if sim.robots[other_robot] == next_pos:
+                        blocking_robot = other_robot
+                        break
+                
+                if blocking_robot is not None:
+                    # Use exchange algorithm if robots are adjacent
+                    if manhattan_distance(current_pos, next_pos) == 1:
+                        exchange_moves = exchange2x2(
+                            current_pos, sim.robots[blocking_robot],
+                            next_pos, current_pos
+                        )
+                        robot_moves = exchangeToMoves(exchange_moves, [robot_id, blocking_robot])
+                        moves_sequence.extend(robot_moves)
+                        
+                        # Update positions after exchange
+                        sim.robots[robot_id], sim.robots[blocking_robot] = (
+                            sim.robots[blocking_robot], sim.robots[robot_id]
+                        )
+                else:
+                    # Make the move
+                    direction = get_move_direction(current_pos, next_pos)
+                    moves_sequence.append([(robot_id, direction)])
+                    sim.robots[robot_id] = next_pos
+        
+        # Update display and capture frame
+        surface = save_frame_as_surface(sim)
+        frames.append(pygame.surfarray.array3d(surface))
+        screen.blit(surface, (0, 0))
+        pygame.display.flip()
+        clock.tick(FPS)
+        
+        # Handle pygame events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return moves_sequence
+    
+    # Save frames as GIF
+    import imageio
+    frames = [frame.swapaxes(0, 1) for frame in frames]  # Fix orientation
+    imageio.mimsave('robot_simulation.gif', frames, fps=FPS)
+    
+    # Keep window open until user closes it
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return moves_sequence
+        clock.tick(FPS)
+    
+    return moves_sequence
 
 #load the data file and get the map
 sim = RobotGridSimulation(6,11,6)
 sim.loadMap("map1.txt")
-
-show_pygame_window()
 
 # Define constants
 VELOCITY = 5
@@ -424,63 +497,7 @@ def get_move_direction(current_pos, next_pos):
     if dy == -1: return 'd'
     return None
 
-def solve_robot_paths():
-    unplaced_robots = list(range(len(sim.robots)))
-    moves_sequence = []
-    
-    while unplaced_robots:
-        # Try to move each unplaced robot
-        for robot_id in unplaced_robots[:]:
-            current_pos = sim.robots[robot_id]
-            goal_pos = sim.robotGoals[robot_id]
-            
-            if current_pos == goal_pos:
-                unplaced_robots.remove(robot_id)
-                continue
-            
-            # Get occupied positions except current robot
-            occupied = set(sim.robots[i] for i in range(len(sim.robots)) if i != robot_id)
-            
-            # Find path to goal
-            path = a_star_path(current_pos, goal_pos, sim, occupied)
-            
-            if path and len(path) > 1:
-                # Move one step along the path
-                next_pos = path[1]
-                
-                # Check if next position is occupied by another robot
-                blocking_robot = None
-                for other_robot in range(len(sim.robots)):
-                    if sim.robots[other_robot] == next_pos:
-                        blocking_robot = other_robot
-                        break
-                
-                if blocking_robot is not None:
-                    # Use exchange algorithm if robots are adjacent
-                    if manhattan_distance(current_pos, next_pos) == 1:
-                        exchange_moves = exchange2x2(
-                            current_pos, sim.robots[blocking_robot],
-                            next_pos, current_pos
-                        )
-                        robot_moves = exchangeToMoves(exchange_moves, [robot_id, blocking_robot])
-                        moves_sequence.extend(robot_moves)
-                        
-                        # Update positions after exchange
-                        sim.robots[robot_id], sim.robots[blocking_robot] = (
-                            sim.robots[blocking_robot], sim.robots[robot_id]
-                        )
-                else:
-                    # Make the move
-                    direction = get_move_direction(current_pos, next_pos)
-                    moves_sequence.append([(robot_id, direction)])
-                    sim.robots[robot_id] = next_pos
-        
-        # Visualize current state
-        show_pygame_window()
-        pygame.time.wait(int(1000/FPS))
-    
-    return moves_sequence
-
-# Execute the solution
+# Remove the show_pygame_window() call and just execute the solution
 moves = solve_robot_paths()
 print("Solution found with", len(moves), "steps")
+print("Simulation saved as 'robot_simulation.gif'")
