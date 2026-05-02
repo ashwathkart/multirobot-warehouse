@@ -9,7 +9,7 @@ from visualization.renderer import save_frame_as_surface
 from visualization.frame_manager import FrameManager
 from collision.resolver import exchange2x2, exchangeToMoves
 from planning.planner_factory import PlannerFactory
-from map_generator import generate_warehouse_map, save_map_file
+from simulation.fms import FleetManagementSystem
 
 
 def get_move_direction(current_pos, next_pos):
@@ -28,10 +28,18 @@ def manhattan_distance(p1, p2):
     return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
 
 
-def solve_robot_paths(sim, planner, frame_manager):
+def solve_robot_paths(sim, planner, frame_manager, fms=None):
     """Solve robot paths using the specified planner"""
     if not pygame.get_init():
         pygame.init()
+
+    # If FMS provided, override robot goals with FMS assignments
+    if fms:
+        fms.initialize_tasks([sim.robots[i] for i in range(len(sim.robots))],
+                            fms.sources, fms.destinations)
+        for robot_id, (source, dest) in fms.get_all_tasks().items():
+            sim.robotGoals[robot_id] = dest
+        fms.print_tasks()
 
     # Set up pygame window
     window_width = sim.width * 50  # CELL_SIZE from config
@@ -170,14 +178,39 @@ def main():
     sim = RobotGridSimulation(args.robots, args.width, args.height)
     sim.loadMap(args.map)
 
+    # Create FMS and extract I/O locations from map
+    fms = FleetManagementSystem()
+    # Find all numbered locations (1-9) as I/O points
+    input_locs = []
+    output_locs = []
+    visited = set()
+    for x in range(sim.width):
+        for y in range(sim.height):
+            # Check if this position was marked as a goal in the map
+            for goal in sim.robotGoals:
+                if goal and goal == (x, y) and goal not in visited:
+                    output_locs.append(goal)
+                    visited.add(goal)
+    # For input locations, use the lower-numbered positions if available
+    # For now, duplicate the output locations as inputs
+    input_locs = output_locs[:len(output_locs)//2] if output_locs else [(1, sim.height//2)]
+    output_locs = output_locs[len(output_locs)//2:] if len(output_locs) > 1 else output_locs
+    if not input_locs:
+        input_locs = [(1, sim.height // 2)]
+    if not output_locs:
+        output_locs = [(sim.width - 2, sim.height // 2)]
+
+    fms.sources = input_locs
+    fms.destinations = output_locs
+
     # Create planner
     planner = PlannerFactory.create(args.planner)
 
     # Create frame manager
     frame_manager = FrameManager(enable_rendering=not args.no_render)
 
-    # Solve paths
-    moves = solve_robot_paths(sim, planner, frame_manager)
+    # Solve paths with FMS
+    moves = solve_robot_paths(sim, planner, frame_manager, fms)
 
     # Save GIF
     if frame_manager.enable_rendering:
