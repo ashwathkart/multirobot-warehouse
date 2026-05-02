@@ -2,8 +2,9 @@ import pygame
 import argparse
 import sys
 import random
+import time
 
-from config import FPS, DEFAULT_ROBOTS, DEFAULT_WIDTH, DEFAULT_HEIGHT, IO_POINTS_PER_SIDE
+from config import FPS, DEFAULT_ROBOTS, DEFAULT_WIDTH, DEFAULT_HEIGHT, IO_POINTS_PER_SIDE, DEFAULT_MAX_TIME
 from simulation.world import RobotGridSimulation
 from visualization.renderer import save_frame_as_surface
 from visualization.frame_manager import FrameManager
@@ -28,7 +29,7 @@ def manhattan_distance(p1, p2):
     return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
 
 
-def solve_robot_paths(sim, planner, frame_manager, fms=None):
+def solve_robot_paths(sim, planner, frame_manager, fms=None, max_time=None):
     """Solve robot paths using the specified planner"""
     if not pygame.get_init():
         pygame.init()
@@ -54,6 +55,7 @@ def solve_robot_paths(sim, planner, frame_manager, fms=None):
 
     unplaced_robots = list(range(len(sim.robots)))
     moves_sequence = []
+    start_time = time.time()
 
     # Capture initial state
     surface = save_frame_as_surface(sim)
@@ -64,6 +66,13 @@ def solve_robot_paths(sim, planner, frame_manager, fms=None):
         clock.tick(FPS)
 
     while unplaced_robots:
+        # Check time limit
+        if max_time is not None:
+            elapsed_time = time.time() - start_time
+            if elapsed_time > max_time:
+                print(f"Time limit ({max_time}s) reached. Stopping simulation.")
+                break
+
         # Try to move each unplaced robot
         for robot_id in unplaced_robots[:]:
             current_pos = sim.robots[robot_id]
@@ -150,6 +159,8 @@ def main():
                         choices=PlannerFactory.list_available(),
                         help='Path planning algorithm')
     parser.add_argument('--no-render', action='store_true', help='Disable rendering')
+    parser.add_argument('--max-time', type=float, default=None,
+                        help='Maximum simulation time in seconds (default: unlimited)')
     parser.add_argument('--seed', type=int, default=None, help='Random seed')
 
     args = parser.parse_args()
@@ -210,7 +221,9 @@ def main():
     frame_manager = FrameManager(enable_rendering=not args.no_render)
 
     # Solve paths with FMS
-    moves = solve_robot_paths(sim, planner, frame_manager, fms)
+    start_time = time.time()
+    moves = solve_robot_paths(sim, planner, frame_manager, fms, max_time=args.max_time)
+    elapsed_time = time.time() - start_time
 
     # Save GIF
     if frame_manager.enable_rendering:
@@ -218,6 +231,7 @@ def main():
 
     print(f"Solution found with {len(moves)} steps")
     print(f"Frames captured: {frame_manager.get_frame_count()}")
+    print(f"Elapsed time: {elapsed_time:.2f}s")
 
 
 if __name__ == '__main__':
