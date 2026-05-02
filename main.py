@@ -7,6 +7,7 @@ import time
 from config import FPS, DEFAULT_ROBOTS, DEFAULT_WIDTH, DEFAULT_HEIGHT, IO_POINTS_PER_SIDE, DEFAULT_MAX_TIME
 from simulation.world import RobotGridSimulation
 from simulation.fms import FleetManagementSystem
+from results.logger import ResultsLogger
 from visualization.renderer import save_frame_as_surface
 from visualization.frame_manager import FrameManager
 from collision.resolver import exchange2x2, exchangeToMoves
@@ -195,6 +196,9 @@ def main():
                         help='Path planning algorithm')
     parser.add_argument('--no-render', action='store_true', help='Disable rendering')
     parser.add_argument('--no-obstacles', action='store_true', help='Disable dynamic obstacles')
+    parser.add_argument('--output-dir', type=str, default='results',
+                        help='Directory to save results')
+    parser.add_argument('--no-save-results', action='store_true', help='Do not save results')
     parser.add_argument('--max-time', type=float, default=None,
                         help='Maximum simulation time in seconds (default: unlimited)')
     parser.add_argument('--seed', type=int, default=None, help='Random seed')
@@ -259,18 +263,39 @@ def main():
     # Create frame manager
     frame_manager = FrameManager(enable_rendering=not args.no_render)
 
+    # Create results logger
+    logger = ResultsLogger(output_dir=args.output_dir)
+
     # Solve paths with FMS and obstacle manager
     start_time = time.time()
     moves = solve_robot_paths(sim, planner, frame_manager, fms, obstacle_mgr, max_time=args.max_time)
     elapsed_time = time.time() - start_time
 
-    # Save GIF
+    # Prepare statistics
+    completed_robots = sum(1 for goal in sim.robotGoals if sim.robots[sim.robotGoals.index(goal)] == goal)
+    stats = {
+        'total_steps': len(moves),
+        'frames_captured': frame_manager.get_frame_count(),
+        'elapsed_time': elapsed_time,
+        'num_robots': len(sim.robots),
+        'map_width': sim.width,
+        'map_height': sim.height,
+        'planner': args.planner,
+        'max_time_limit': args.max_time,
+        'dynamic_obstacles_enabled': not args.no_obstacles,
+    }
+
+    logger.set_stats(stats)
+
+    # Save results if not disabled
+    if not args.no_save_results:
+        logger.save_all(frames=frame_manager.frames if frame_manager.enable_rendering else None,
+                       fps=FPS)
+        logger.print_summary()
+
+    # Also save GIF with old filename for compatibility
     if frame_manager.enable_rendering:
         frame_manager.save_gif('robot_simulation.gif')
-
-    print(f"Solution found with {len(moves)} steps")
-    print(f"Frames captured: {frame_manager.get_frame_count()}")
-    print(f"Elapsed time: {elapsed_time:.2f}s")
 
 
 if __name__ == '__main__':
