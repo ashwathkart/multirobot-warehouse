@@ -6,11 +6,13 @@ import time
 
 from config import FPS, DEFAULT_ROBOTS, DEFAULT_WIDTH, DEFAULT_HEIGHT, IO_POINTS_PER_SIDE, DEFAULT_MAX_TIME
 from simulation.world import RobotGridSimulation
+from simulation.fms import FleetManagementSystem
 from visualization.renderer import save_frame_as_surface
 from visualization.frame_manager import FrameManager
 from collision.resolver import exchange2x2, exchangeToMoves
 from planning.planner_factory import PlannerFactory
-from simulation.fms import FleetManagementSystem
+from simulation.obstacle_manager import ObstacleManager
+from map_generator import generate_warehouse_map, save_map_file
 
 
 def get_move_direction(current_pos, next_pos):
@@ -29,7 +31,7 @@ def manhattan_distance(p1, p2):
     return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
 
 
-def solve_robot_paths(sim, planner, frame_manager, fms=None, max_time=None):
+def solve_robot_paths(sim, planner, frame_manager, fms=None, obstacle_mgr=None, max_time=None):
     """Solve robot paths using the specified planner"""
     if not pygame.get_init():
         pygame.init()
@@ -41,6 +43,10 @@ def solve_robot_paths(sim, planner, frame_manager, fms=None, max_time=None):
         for robot_id, (source, dest) in fms.get_all_tasks().items():
             sim.robotGoals[robot_id] = dest
         fms.print_tasks()
+
+    # Initialize obstacle manager
+    if obstacle_mgr:
+        obstacle_mgr.initialize_from_world(sim)
 
     # Set up pygame window
     window_width = sim.width * 50  # CELL_SIZE from config
@@ -56,6 +62,8 @@ def solve_robot_paths(sim, planner, frame_manager, fms=None, max_time=None):
     unplaced_robots = list(range(len(sim.robots)))
     moves_sequence = []
     start_time = time.time()
+    step_count = 0
+    obstacle_spawn_interval = 10  # Add obstacle every N steps
 
     # Capture initial state
     surface = save_frame_as_surface(sim)
@@ -73,6 +81,19 @@ def solve_robot_paths(sim, planner, frame_manager, fms=None, max_time=None):
                 print(f"Time limit ({max_time}s) reached. Stopping simulation.")
                 break
 
+        # Periodically add/remove dynamic obstacles
+        if obstacle_mgr and step_count % obstacle_spawn_interval == 0:
+            # Randomly add an obstacle in open space
+            if random.random() < 0.3:  # 30% chance each interval
+                x = random.randint(2, sim.width - 3)
+                y = random.randint(2, sim.height - 3)
+                if not sim.obstacles[x][y] and (x, y) not in [r for r in sim.robots]:
+                    obstacle_mgr.add_obstacle((x, y))
+            # Remove a random dynamic obstacle
+            if obstacle_mgr.dynamic_obstacles and random.random() < 0.2:
+                pos = random.choice(list(obstacle_mgr.dynamic_obstacles.keys()))
+                obstacle_mgr.remove_obstacle(pos)
+
         # Try to move each unplaced robot
         for robot_id in unplaced_robots[:]:
             current_pos = sim.robots[robot_id]
@@ -85,12 +106,24 @@ def solve_robot_paths(sim, planner, frame_manager, fms=None, max_time=None):
             # Get occupied positions except current robot
             occupied = set(sim.robots[i] for i in range(len(sim.robots)) if i != robot_id)
 
+            # Add known obstacles to occupied set for pathfinding
+            if obstacle_mgr:
+                known_obstacles = obstacle_mgr.get_all_obstacles()
+                occupied.update(known_obstacles)
+
             # Find path to goal
             path = planner.plan(current_pos, goal_pos, sim, occupied)
 
             if path and len(path) > 1:
                 # Move one step along the path
                 next_pos = path[1]
+
+                # Check if next position is an obstacle (for discovery)
+                if obstacle_mgr and next_pos in obstacle_mgr.dynamic_obstacles:
+                    # Robot discovered a dynamic obstacle!
+                    obstacle_mgr.robot_discovers_obstacle(robot_id, next_pos)
+                    print(f"Robot {robot_id} discovered obstacle at {next_pos}")
+                    continue
 
                 # Check if next position is occupied by another robot
                 blocking_robot = None
@@ -133,6 +166,8 @@ def solve_robot_paths(sim, planner, frame_manager, fms=None, max_time=None):
                     pygame.quit()
                     return moves_sequence
 
+        step_count += 1
+
     # Keep window open until user closes it
     if frame_manager.enable_rendering:
         while True:
@@ -159,6 +194,7 @@ def main():
                         choices=PlannerFactory.list_available(),
                         help='Path planning algorithm')
     parser.add_argument('--no-render', action='store_true', help='Disable rendering')
+    parser.add_argument('--no-obstacles', action='store_true', help='Disable dynamic obstacles')
     parser.add_argument('--max-time', type=float, default=None,
                         help='Maximum simulation time in seconds (default: unlimited)')
     parser.add_argument('--seed', type=int, default=None, help='Random seed')
@@ -214,15 +250,18 @@ def main():
     fms.sources = input_locs
     fms.destinations = output_locs
 
+    # Create obstacle manager
+    obstacle_mgr = None if args.no_obstacles else ObstacleManager()
+
     # Create planner
     planner = PlannerFactory.create(args.planner)
 
     # Create frame manager
     frame_manager = FrameManager(enable_rendering=not args.no_render)
 
-    # Solve paths with FMS
+    # Solve paths with FMS and obstacle manager
     start_time = time.time()
-    moves = solve_robot_paths(sim, planner, frame_manager, fms, max_time=args.max_time)
+    moves = solve_robot_paths(sim, planner, frame_manager, fms, obstacle_mgr, max_time=args.max_time)
     elapsed_time = time.time() - start_time
 
     # Save GIF
