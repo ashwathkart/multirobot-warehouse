@@ -1,13 +1,15 @@
 import pygame
 import argparse
 import sys
+import random
 
-from config import FPS, DEFAULT_ROBOTS
+from config import FPS, DEFAULT_ROBOTS, DEFAULT_WIDTH, DEFAULT_HEIGHT, IO_POINTS_PER_SIDE
 from simulation.world import RobotGridSimulation
 from visualization.renderer import save_frame_as_surface
 from visualization.frame_manager import FrameManager
 from collision.resolver import exchange2x2, exchangeToMoves
 from planning.planner_factory import PlannerFactory
+from map_generator import generate_warehouse_map, save_map_file
 
 
 def get_move_direction(current_pos, next_pos):
@@ -130,15 +132,42 @@ def main():
     parser = argparse.ArgumentParser(description='Multi-Robot Warehouse Simulation')
     parser.add_argument('--robots', type=int, default=DEFAULT_ROBOTS, help='Number of robots')
     parser.add_argument('--map', type=str, default='map1.txt', help='Path to map file')
+    parser.add_argument('--generate-map', action='store_true',
+                        help='Generate a new map instead of loading')
+    parser.add_argument('--width', type=int, default=DEFAULT_WIDTH, help='Map width (for generation)')
+    parser.add_argument('--height', type=int, default=DEFAULT_HEIGHT, help='Map height (for generation)')
+    parser.add_argument('--io-points', type=int, default=IO_POINTS_PER_SIDE,
+                        help='I/O points per side (for generation)')
     parser.add_argument('--planner', type=str, default='astar',
                         choices=PlannerFactory.list_available(),
                         help='Path planning algorithm')
     parser.add_argument('--no-render', action='store_true', help='Disable rendering')
+    parser.add_argument('--seed', type=int, default=None, help='Random seed')
 
     args = parser.parse_args()
 
+    # Set random seed if provided
+    if args.seed is not None:
+        random.seed(args.seed)
+
+    # Generate or load map
+    if args.generate_map:
+        print(f"Generating {args.width}x{args.height} map with {args.io_points} I/O points per side...")
+        grid, input_locs, output_locs = generate_warehouse_map(
+            width=args.width,
+            height=args.height,
+            io_points_per_side=args.io_points
+        )
+        # Create robot starting positions (spread across center-left area)
+        robot_positions = [
+            (args.width // 4 + i % 2 * 2, args.height // 2 + (i // 2) * 2 - (args.robots // 2) * 2)
+            for i in range(args.robots)
+        ]
+        save_map_file(args.map, grid, input_locs, output_locs, robot_positions)
+        print(f"Generated and saved map to {args.map}")
+
     # Initialize simulation
-    sim = RobotGridSimulation(args.robots, 11, 6)
+    sim = RobotGridSimulation(args.robots, args.width, args.height)
     sim.loadMap(args.map)
 
     # Create planner
