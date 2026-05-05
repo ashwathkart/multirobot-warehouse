@@ -10,7 +10,7 @@ class ResultsLogger:
     Saves GIFs and statistics to timestamped files.
     """
 
-    def __init__(self, output_dir: str = 'results'):
+    def __init__(self, output_dir: str = 'logs'):
         self.output_dir = output_dir
         self.timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         self.stats: Dict[str, Any] = {}

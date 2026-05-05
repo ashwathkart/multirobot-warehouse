@@ -196,7 +196,7 @@ def main():
                         help='Path planning algorithm')
     parser.add_argument('--no-render', action='store_true', help='Disable rendering')
     parser.add_argument('--no-obstacles', action='store_true', help='Disable dynamic obstacles')
-    parser.add_argument('--output-dir', type=str, default='results',
+    parser.add_argument('--output-dir', type=str, default='logs',
                         help='Directory to save results')
     parser.add_argument('--no-save-results', action='store_true', help='Do not save results')
     parser.add_argument('--max-time', type=float, default=None,
@@ -292,10 +292,6 @@ def main():
         logger.save_all(frames=frame_manager.frames if frame_manager.enable_rendering else None,
                        fps=FPS)
         logger.print_summary()
-
-    # Also save GIF with old filename for compatibility
-    if frame_manager.enable_rendering:
-        frame_manager.save_gif('robot_simulation.gif')
 
 
 if __name__ == '__main__':
